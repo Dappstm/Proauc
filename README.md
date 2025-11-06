@@ -16,7 +16,7 @@ Proauc is a Python automation system that finds trending short videos from **You
 
 When you run the program once, it will:
 
-1. 🔍 **Search** multiple platforms (YouTube + Reddit) for trending short videos.
+1. 🔍 **Search** YouTube for trending short videos.
 2. 🎥 **Select** a random set of 4–8 short clips that are under 58 seconds each.
 3. ⬇️ **Download** the clips locally using `yt-dlp`.
 4. ✂️ **Edit & Combine** them vertically (9:16) using `moviepy`.
