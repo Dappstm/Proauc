@@ -164,4 +164,5 @@ def compose_short(clip_paths, labels=None, output_filename="final_short.mp4"):
         threads=4,
         preset="medium"
     )
+    output_path.ai_generated_title = main_title
     return output_path
