@@ -82,9 +82,9 @@ def search_youtube_short_videos(
         if duration == 0 or duration > 58:
             continue
 
-        # ensure it has at least one keyword in title or tags
-        title_lower = title.lower()
-        if not any(tag.lower() in title_lower or tag.lower() in (", ".join(tags_in_video)).lower() for tag in tags):
+        # only allow videos that have at least one of our keywords in their tags
+        tags_combined = ", ".join(tags_in_video).lower()
+        if not any(keyword.lower() in tags_combined for keyword in tags):
             continue
 
         items.append({
