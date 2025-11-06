@@ -66,8 +66,8 @@ def main():
     response = upload_video(
         file_path=output_path,
         title=title,
-        description="Automated compilation of trending funny viral shorts.",
-        tags=["shorts", "funny", "viral", "compilation"],
+        description="Compilation of trending funny viral shorts.",
+        tags=["shorts", "funny", "viral", "compilation", "trending"],
         privacy="public"
     )
     print("✅ Upload completed.")
