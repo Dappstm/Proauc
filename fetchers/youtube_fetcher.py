@@ -1,13 +1,16 @@
 # fetchers/youtube_fetcher.py
-from googleapiclient.discovery import build
-from datetime import datetime, timedelta, timezone
-from config import YOUTUBE_CLIENT_SECRETS_FILE
 import os
 import re
+import json
 import random
+from googleapiclient.discovery import build
+from datetime import datetime, timedelta, timezone
 
-YOUTUBE_API_KEY = os.getenv("")
+# === CONFIG ===
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+SEEN_VIDEOS_FILE = "data/seen_videos.json"  # store previously used videos
 
+# === HELPERS ===
 def parse_iso_duration(duration_str):
     """Convert ISO 8601 duration (e.g., PT45S, PT1M2S) to seconds."""
     match = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", duration_str)
@@ -18,39 +21,64 @@ def parse_iso_duration(duration_str):
     seconds = int(match.group(3)) if match.group(3) else 0
     return hours * 3600 + minutes * 60 + seconds
 
+
+def load_seen_videos():
+    """Load list of previously used video IDs."""
+    if os.path.exists(SEEN_VIDEOS_FILE):
+        with open(SEEN_VIDEOS_FILE, "r") as f:
+            try:
+                return set(json.load(f))
+            except json.JSONDecodeError:
+                return set()
+    return set()
+
+
+def save_seen_videos(video_ids):
+    """Save list of used video IDs."""
+    os.makedirs(os.path.dirname(SEEN_VIDEOS_FILE), exist_ok=True)
+    with open(SEEN_VIDEOS_FILE, "w") as f:
+        json.dump(list(video_ids), f, indent=2)
+
+
+# === MAIN FUNCTION ===
 def search_youtube_short_videos(
-    tags=("short", "funny", "viral"),
+    tags=("rdr2", "reddeadredemption2", "rdro"),
     max_results=50,
     max_total_duration=58,
-    min_clips=4,
-    max_clips=8,
-    min_likes=7000
+    min_likes=1000,
+    max_clips=5
 ):
     """
-    Search for recent short YouTube videos with specific tags,
-    not older than 1 month, and ensure total selected clips fit ≤ 58s.
-    Filters out videos with fewer than `min_likes`.
+    Search for RDR2-related short YouTube videos with:
+    - Minimum 1000 likes
+    - Published AT LEAST 60 days ago
+    - Duration ≤ 58s
+    - Maximum of 5 clips returned
+    - Skips any previously used videos
     """
     if not YOUTUBE_API_KEY:
         print("⚠️ Missing YOUTUBE_API_KEY in environment variables.")
         return []
 
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    seen_videos = load_seen_videos()
 
-    # Calculate date 1 month ago (in ISO format)
-    published_after = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    # ✅ Only look for videos published at least 60 days ago
+    published_before = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
 
-    # Build combined search query
-    query = " ".join(tags)
+    query = " OR ".join(tags)
+    print(f"🔍 Searching YouTube for RDR2-related shorts ({query})...")
 
-    # 1️⃣ Search for short videos published within the last month
+    # 1️⃣ Search for short videos with relevant tags
     search_req = youtube.search().list(
         part="snippet",
         q=query,
         type="video",
         videoDuration="short",
-        publishedAfter=published_after,
-        maxResults=max_results
+        maxResults=max_results,
+        publishedBefore=published_before,
+        relevanceLanguage="en",
+        order="viewCount",
     )
     search_res = search_req.execute()
     video_ids = [item["id"]["videoId"] for item in search_res.get("items", [])]
@@ -69,26 +97,28 @@ def search_youtube_short_videos(
     # 3️⃣ Filter and format results
     items = []
     for vid in video_res.get("items", []):
-        title = vid["snippet"]["title"]
         video_id = vid["id"]
-        duration = parse_iso_duration(vid["contentDetails"]["duration"])
-        tags_in_video = vid["snippet"].get("tags", [])
-        published = vid["snippet"]["publishedAt"]
-        stats = vid.get("statistics", {})
 
-        like_count = int(stats.get("likeCount", 0))  # Some videos may have likes hidden
-
-        # Filter out videos with too few likes
-        if like_count < min_likes:
+        # skip already used
+        if video_id in seen_videos:
             continue
 
-        # Filter by duration
+        title = vid["snippet"]["title"]
+        duration = parse_iso_duration(vid["contentDetails"]["duration"])
+        published = vid["snippet"]["publishedAt"]
+        stats = vid.get("statistics", {})
+        like_count = int(stats.get("likeCount", 0))
+
+        # Filter by likes & duration
+        if like_count < min_likes:
+            continue
         if duration == 0 or duration > 58:
             continue
 
-        # Filter by keyword tags
-        tags_combined = ", ".join(tags_in_video).lower()
-        if not any(keyword.lower() in tags_combined for keyword in tags):
+        # Confirm it’s relevant to RDR2
+        tags_in_video = vid["snippet"].get("tags", [])
+        tags_combined = (title + " " + " ".join(tags_in_video)).lower()
+        if not any(tag in tags_combined for tag in tags):
             continue
 
         items.append({
@@ -101,26 +131,19 @@ def search_youtube_short_videos(
             "source": "youtube"
         })
 
-    # 4️⃣ Ensure the total duration of chosen 4–8 clips ≤ 58s
-    items.sort(key=lambda x: x["duration"])  # shortest first
-    valid_sets = []
-    for n in range(min_clips, max_clips + 1):
-        total = 0
-        selection = []
-        for v in items:
-            if total + v["duration"] <= max_total_duration:
-                selection.append(v)
-                total += v["duration"]
-                if len(selection) == n:
-                    break
-        if len(selection) == n:
-            valid_sets.append(selection)
-
-    if not valid_sets:
-        print("⚠️ Could not find enough clips to fit under total duration limit.")
+    if not items:
+        print("⚠️ No videos passed filters.")
         return []
 
-    chosen = random.choice(valid_sets)
-    print(f"✅ Selected {len(chosen)} YouTube clips totaling {sum(v['duration'] for v in chosen)}s")
-    print(f"✅ All videos have ≥ {min_likes} likes.")
+    # 4️⃣ Pick up to max_clips
+    random.shuffle(items)
+    chosen = items[:max_clips]
+
+    # 5️⃣ Remember used video IDs
+    used = seen_videos.union({v["videoId"] for v in chosen})
+    save_seen_videos(used)
+
+    print(f"✅ Selected {len(chosen)} RDR2 YouTube clips totaling {sum(v['duration'] for v in chosen)}s")
+    print(f"✅ All videos have ≥ {min_likes} likes and are at least 60 days old.")
+    print(f"🧠 Remembered {len(used)} total seen videos.")
     return chosen
