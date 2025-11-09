@@ -11,7 +11,7 @@ def main():
     print("🔍 Searching YouTube for trending funny/viral shorts...")
     # Fetch curated videos from YouTube only
     yt_videos = search_youtube_short_videos(
-        tags=("short", "funny", "viral"),
+        tags=("rdr2", "reddeadredemption2", "rdro"),
         max_results=50,
         max_total_duration=58,
         min_clips=MIN_CLIPS,
